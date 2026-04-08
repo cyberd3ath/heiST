@@ -5,6 +5,7 @@ import os
 import socket
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
 
@@ -52,33 +53,18 @@ class GACommandError(GuestAgentError):
         self.desc = desc
 
 
+@dataclass(slots=True)
 class ExecResult:
     """Result of a guest-exec call."""
 
-    __slots__ = ("pid", "exit_code", "stdout", "stderr", "exited")
-
-    def __init__(
-        self,
-        pid: int,
-        exit_code: int = -1,
-        stdout: str = "",
-        stderr: str = "",
-        exited: bool = False,
-    ) -> None:
-        self.pid = pid
-        self.exit_code = exit_code
-        self.stdout = stdout
-        self.stderr = stderr
-        self.exited = exited
+    pid: int
+    exit_code: int = -1
+    stdout: str = ""
+    stderr: str = ""
+    exited: bool = False
 
     def __bool__(self) -> bool:
         return self.exit_code == 0
-
-    def __repr__(self) -> str:
-        return (
-            f"ExecResult(pid={self.pid}, exit_code={self.exit_code}, "
-            f"exited={self.exited})"
-        )
 
 
 class _QEMUGATransport:
