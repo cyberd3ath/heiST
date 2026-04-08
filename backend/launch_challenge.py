@@ -1,5 +1,4 @@
 import random
-import subprocess
 
 from subnet_calculations import nth_network_subnet
 from DatabaseClasses import *
@@ -12,6 +11,7 @@ import time
 from dotenv import load_dotenv, find_dotenv
 import hashlib
 import hmac
+from qemu_ga_wrapper import GuestAgent, GuestAgentError
 
 load_dotenv(find_dotenv())
 
@@ -280,18 +280,16 @@ def configure_wazuh_for_challenge(challenge, manager_ip="fd12:3456:789a:1::101")
 
 def wait_for_qemu_guest_agent(machine, timeout=120):
     """
-    Wait until QEMU Guest Agent is ready
+    Wait until QEMU Guest Agent is ready.
     """
-    start_time = time.time()
+    deadline = time.monotonic() + timeout
 
-    while time.time() - start_time < timeout:
+    while time.monotonic() < deadline:
         try:
-            cmd = f"qm guest exec {machine.id} -- echo 'ready'"
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
-
-            if result.returncode == 0:
-                return True
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+            with GuestAgent(vmid=machine.id) as ga:
+                if ga.ping():
+                    return True
+        except GuestAgentError:
             pass
 
         time.sleep(5)
@@ -307,49 +305,46 @@ def configure_ipv6_and_wazuh_via_guest_agent(machine, manager_ip="fd12:3456:789a
     vrtmon_gw = "fd12:3456:789a:1::1"
     agent_name = f"Agent_{machine.id}"
 
-    # Step 1: Configure IPv6
-    cmd = f"""iface=$(ip -o link | awk "/0a:01/ {{print \\$2; exit}}" | tr -d :) && \
-    ip -6 addr add {ipv6}/64 dev $iface && \
-    ip -6 route add default via {vrtmon_gw}"""
+    with GuestAgent(vmid=machine.id) as ga:
+        ga.exec(
+            f'iface=$(ip -o link | awk "/0a:01/ {{print \\$2; exit}}" | tr -d :) && '
+            f'ip -6 addr add {ipv6}/64 dev $iface && '
+            f'ip -6 route add default via {vrtmon_gw}',
+            capture_output=True,
+            timeout=20,
+        )
 
-    subprocess.run(f"qm guest exec {machine.id} -- bash -c '{cmd}'", shell=True, capture_output=True, text=True)
+        try:
+            ga.exec(["systemctl", "stop", "wazuh-agent"], capture_output=True, timeout=30)
+        except GuestAgentError:
+            pass
 
-    # Step 2: Stop Wazuh agent if running
-    cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "stop", "wazuh-agent"]
-    subprocess.run(cmd, capture_output=True, text=True, timeout=30)  # Ignore errors
+        result = ga.exec(
+            [
+                "/var/monitoring/wazuh-agent/setup_wazuh.sh",
+                "--register",
+                f"--manager={manager_ip}",
+                f"--name={agent_name}",
+                f"--password={WAZUH_ENROLLMENT_PASSWORD}",
+                "--yes",
+            ],
+            capture_output=True,
+            timeout=60,
+        )
+        if not result:
+            raise RuntimeError(f"Failed to register Wazuh agent for VM {machine.id}: {result.stderr}")
 
-    # Step 3: Register agent with manager
-    cmd = [
-        "qm", "guest", "exec", str(machine.id), "--",
-        "/var/monitoring/wazuh-agent/setup_wazuh.sh",
-        "--register",
-        f"--manager={manager_ip}",
-        f"--name={agent_name}",
-        f"--password={WAZUH_ENROLLMENT_PASSWORD}",
-        "--yes"
-    ]
+        ga.exec(["systemctl", "daemon-reload"], capture_output=True, timeout=30)
+        ga.exec(["systemctl", "enable", "wazuh-agent"], capture_output=True, timeout=30)
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        result = ga.exec(["systemctl", "start", "wazuh-agent"], capture_output=True, timeout=30)
+        if not result:
+            raise RuntimeError(f"Failed to start Wazuh agent for VM {machine.id}: {result.stderr}")
 
-    if result.returncode != 0:
-        raise RuntimeError(f"Failed to register Wazuh agent for VM {machine.id}: {result.stderr}")
-
-    # Step 4: Start Wazuh agent
-    cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "daemon-reload"]
-    subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-
-    cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "enable", "wazuh-agent"]
-    subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-
-    cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "start", "wazuh-agent"]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-
-    if result.returncode != 0:
-        raise RuntimeError(f"Failed to start Wazuh agent for VM {machine.id}: {result.stderr}")
-
-    # Step 5: Clean up monitoring directory
-    cmd = ["qm", "guest", "exec", str(machine.id), "--", "rm", "-rf", "/var/monitoring"]
-    subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        try:
+            ga.exec(["rm", "-rf", "/var/monitoring"], capture_output=False, timeout=30)
+        except GuestAgentError:
+            pass
 
 
 def generate_user_specific_flag(flag_secret, user_unique_id):
@@ -403,25 +398,25 @@ def write_user_specific_flags_to_vm(machine, flags, user_unique_id):
     """
     Write user-specific flags to a VM via QEMU Guest Agent.
     """
-    for flag in flags:
-        order_index = flag['order_index']
-        flag_secret = flag['flag']
+    with GuestAgent(vmid=machine.id) as ga:
+        for flag in flags:
+            order_index = flag['order_index']
+            flag_secret = flag['flag']
 
-        personalized_flag = generate_user_specific_flag(flag_secret, user_unique_id)
+            personalized_flag = generate_user_specific_flag(flag_secret, user_unique_id)
 
-        flag_path = f"/root/flag_{order_index}.txt"
+            flag_path = f"/root/flag_{order_index}.txt"
+            escaped_flag = shlex.quote(personalized_flag)
 
-        escaped_flag = shlex.quote(personalized_flag)
+            result = ga.exec(
+                f"echo {escaped_flag} > {flag_path} && chmod 600 {flag_path}",
+                capture_output=True,
+                timeout=30,
+            )
+            if not result:
+                raise RuntimeError(f"Failed to write flag {order_index} to VM {machine.id}: {result.stderr}")
 
-        cmd = ["qm", "guest", "exec", str(machine.id), "--",
-               "bash", "-c", f"echo {escaped_flag} > {flag_path} && chmod 600 {flag_path}"]
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-
-        if result.returncode != 0:
-            raise RuntimeError(f"Failed to write flag {order_index} to VM {machine.id}: {result.stderr}")
-
-        print(f"[Info] Written flag_{order_index}.txt to VM {machine.id}", flush=True)
+            print(f"[Info] Written flag_{order_index}.txt to VM {machine.id}", flush=True)
 
 
 def generate_mac_address(machine_id, local_network_id, local_connection_id):
