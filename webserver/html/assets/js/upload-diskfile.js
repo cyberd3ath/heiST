@@ -1,5 +1,55 @@
 import {messageManager, apiClient} from './utils.js';
 
+function openOSModal() {
+    return new Promise((resolve) => {
+        const overlay = document.getElementById('os-modal-overlay');
+        const nextBtn = document.getElementById('os-next-btn');
+        const cancelBtn = document.getElementById('os-cancel-btn');
+        const osOptions = overlay.querySelectorAll('.os-option');
+
+        osOptions.forEach(o => o.classList.remove('selected'));
+        nextBtn.disabled = true;
+        overlay.classList.add('active');
+
+        function onOptionClick() {
+            osOptions.forEach(o => o.classList.remove('selected'));
+            this.classList.add('selected');
+            nextBtn.disabled = false;
+        }
+
+        function cleanup() {
+            overlay.classList.remove('active');
+            nextBtn.removeEventListener('click', onNext);
+            cancelBtn.removeEventListener('click', onCancel);
+            overlay.removeEventListener('click', onBackdrop);
+            osOptions.forEach(o => o.removeEventListener('click', onOptionClick));
+        }
+
+        function onNext() {
+            const selected = overlay.querySelector('.os-option.selected');
+            cleanup();
+            resolve(selected ? selected.dataset.os : null);
+        }
+
+        function onCancel() {
+            cleanup();
+            resolve(null);
+        }
+
+        function onBackdrop(e) {
+            if (e.target === overlay) {
+                cleanup();
+                resolve(null);
+            }
+        }
+
+        osOptions.forEach(o => o.addEventListener('click', onOptionClick));
+        nextBtn.addEventListener('click', onNext);
+        cancelBtn.addEventListener('click', onCancel);
+        overlay.addEventListener('click', onBackdrop);
+    });
+}
+
 class FileUploader {
     constructor() {
         this.domElements = {
@@ -140,6 +190,11 @@ class FileUploader {
     async handleUpload() {
         if (!this.state.selectedFile) return;
 
+        const guestOS = await openOSModal();
+        if (!guestOS) return;
+
+        this.state.guestOS = guestOS;
+
         const useChunkedUpload = this.state.selectedFile.size > this.config.CHUNK_UPLOAD_THRESHOLD;
 
         try {
@@ -157,6 +212,7 @@ class FileUploader {
     async handleDirectUpload() {
         const formData = new FormData();
         formData.append('ova_file', this.state.selectedFile);
+        formData.append('guest_os', this.state.guestOS);
 
         this.setUploadingState(true);
 
@@ -185,7 +241,8 @@ class FileUploader {
                 uploadId: 'temp_' + Date.now(),
                 fileName: this.state.selectedFile.name,
                 fileSize: this.state.selectedFile.size,
-                totalChunks: totalChunks
+                totalChunks: totalChunks,
+                guest_os: this.state.guestOS
             });
 
             if(initData?.success) {

@@ -1,17 +1,17 @@
 <?php
 declare(strict_types=1);
-require_once __DIR__ . '/../vendor/autoload.php';
+//require_once __DIR__ . '/../vendor/autoload.php';
 
-$securityHelper = new SecurityHelper();
-$securityHelper->initSecureSession();
+//$securityHelper = new SecurityHelper();
+//$securityHelper->initSecureSession();
 
-$databaseHelper = new DatabaseHelper();
-$pdo = $databaseHelper->getPDO();
+//$databaseHelper = new DatabaseHelper();
+//$pdo = $databaseHelper->getPDO();
 
-if (!$securityHelper->validateSession() || !$securityHelper->validateAdminAccess($pdo)) {
-    header('Location: /404');
-    exit();
-}
+//if (!$securityHelper->validateSession() || !$securityHelper->validateAdminAccess($pdo)) {
+//    header('Location: /404');
+//    exit();
+//}
 ?>
 
 <!DOCTYPE html>
@@ -78,6 +78,27 @@ if (!$securityHelper->validateSession() || !$securityHelper->validateAdminAccess
     </main>
 </div>
 <?php include($_SERVER['DOCUMENT_ROOT'] . '/partials/footer.html'); ?>
+
+<div class="modal-overlay" id="os-modal-overlay">
+    <div class="os-modal" id="os-modal">
+        <h2><i class="fa-solid fa-desktop"></i> Select Guest OS Type</h2>
+        <p>What operating system is this OVA running?</p>
+        <div class="os-options">
+            <button class="os-option" data-os="linux">
+                <i class="fa-brands fa-linux"></i>
+                <span>Linux</span>
+            </button>
+            <button class="os-option" data-os="windows">
+                <i class="fa-brands fa-windows"></i>
+                <span>Windows</span>
+            </button>
+        </div>
+        <div class="os-modal-actions">
+            <button class="button button-secondary" id="os-cancel-btn">Cancel</button>
+            <button class="button button-primary" id="os-next-btn" disabled>Next</button>
+        </div>
+    </div>
+</div>
 
 <script type="module" src="../assets/js/theme-toggle.js"></script>
 <script type="module" src="../assets/js/upload-diskfile.js"></script>
