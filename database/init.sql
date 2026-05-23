@@ -594,11 +594,15 @@ CREATE TABLE announcements (
 );
 
 
+CREATE TYPE guest_os AS ENUM ('linux', 'windows');
+
+
 CREATE TABLE disk_files (
     id BIGINT PRIMARY KEY DEFAULT nextval('disk_files_id_seq'),
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     display_name TEXT NOT NULL,
     proxmox_filename TEXT NOT NULL,
+    guest_os guest_os NOT NULL DEFAULT 'linux',
     upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (user_id, display_name)
 );
