@@ -188,7 +188,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 15px;
+    margin-bottom: 5px;
 }
 
 .ova-name {
@@ -199,6 +199,15 @@
 
 .ova-date {
     font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.ova-details {
+    margin-bottom: 15px;
+}
+
+.ova-guest-os {
+    padding-left: 5px;
     color: rgba(255, 255, 255, 0.6);
 }
 

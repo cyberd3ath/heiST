@@ -388,6 +388,11 @@ class FileUploader {
                     <div class="ova-name">${ova.display_name}</div>
                     <div class="ova-date">${new Date(ova.upload_date).toLocaleDateString()}</div>
                 </div>
+                <div class="ova-details">
+                    <div class="ova-guest-os">
+                        ${ova.guest_os && ova.guest_os.toLowerCase() === 'windows' ? '<i class="fa-brands fa-windows"></i> windows' : '<i class="fa-brands fa-linux"></i> linux'}
+                    </div>
+                </div>
                 <div class="ova-actions">
                     <button class="button button-primary use-ova-btn">Use This OVA</button>
                     <button class="button button-danger delete-ova-btn"><i class="fa-solid fa-trash"></i></button>
