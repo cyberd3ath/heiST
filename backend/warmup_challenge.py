@@ -137,15 +137,22 @@ def fetch_machines(challenge_template, db_conn):
     print(f"[Info] Fetching machine templates for challenge template {challenge_template.id}", flush=True)
 
     with db_conn.cursor() as cursor:
-        cursor.execute("SELECT id FROM machine_templates WHERE challenge_template_id = %s", (challenge_template.id,))
+        cursor.execute(
+            "SELECT mt.id, df.guest_os "
+            "FROM machine_templates mt "
+            "JOIN disk_files df ON df.proxmox_filename = mt.disk_file_path "
+            "WHERE mt.challenge_template_id = %s",
+            (challenge_template.id,)
+        )
 
         machines_fetched = cursor.fetchall()
         print(f"[Info] Retrieved {len(machines_fetched)} machine templates", flush=True)
 
         for row in machines_fetched:
-            machine_id = row[0]
-            print(f"[Debug] Adding machine template {machine_id} to challenge", flush=True)
+            machine_id, guest_os = row[0], row[1]
+            print(f"[Debug] Adding machine template {machine_id} (guest_os={guest_os}) to challenge", flush=True)
             machine_template = MachineTemplate(machine_template_id=machine_id, challenge_template=challenge_template)
+            machine_template.set_guest_os(guest_os)
 
             # Add machine template to challenge template
             challenge_template.add_machine_template(machine_template)
@@ -320,7 +327,7 @@ def vmid_to_ipv6(vmid, offset=0x1000):
 
 def configure_wazuh_for_challenge(challenge, manager_ip="fd12:3456:789a:1::101"):
     """
-    Configure Wazuh for all machines in parallel.
+    Configure Wazuh for all machines in parallel, dispatching by guest_os.
     Creates one thread per machine, starts all simultaneously, then joins.
     """
 
@@ -329,7 +336,10 @@ def configure_wazuh_for_challenge(challenge, manager_ip="fd12:3456:789a:1::101")
 
     def worker(machine):
         try:
-            configure_ipv6_and_wazuh_via_guest_agent(machine, manager_ip)
+            if machine.template.guest_os == 'windows':
+                configure_ipv6_and_wazuh_windows(machine, manager_ip)
+            else:
+                configure_ipv6_and_wazuh_linux(machine, manager_ip)
         except Exception as e:
             print(f"[Error] Failed to configure Wazuh for VM {machine.id}: {e}", flush=True)
             exceptions.append(e)
@@ -369,10 +379,10 @@ def wait_for_qemu_guest_agent(machine, timeout=120):
     raise TimeoutError(f"QEMU Guest Agent timeout for VM {machine.id}")
 
 
-def configure_ipv6_and_wazuh_via_guest_agent(machine, manager_ip="fd12:3456:789a:1::101"):
+def configure_ipv6_and_wazuh_linux(machine, manager_ip="fd12:3456:789a:1::101"):
     """
-    Configure IPv6 and Wazuh agent via QEMU Guest Agent
-    All Wazuh-related commands are batched into a single execution.
+    Configure IPv6 on the vrtmon NIC and register the Wazuh agent on a Linux VM.
+    Files were staged during import; we only need to --register here.
     """
     ipv6 = vmid_to_ipv6(machine.id)
     vrtmon_gw = "fd12:3456:789a:1::1"
@@ -380,34 +390,100 @@ def configure_ipv6_and_wazuh_via_guest_agent(machine, manager_ip="fd12:3456:789a
 
     full_start_time = time.time()
 
-    # Single aggregated command using &&
-    aggregated_cmd = f"""
-    iface=$(ip -o link | awk "/0a:01/ {{print \\$2; exit}}" | tr -d :) && \
-    ip -6 addr add {ipv6}/64 dev $iface && \
-    ip -6 route add default via {vrtmon_gw} && \
-    systemctl stop wazuh-agent 2>/dev/null || true && \
-    /var/monitoring/wazuh-agent/setup_wazuh.sh \
-        --register \
-        --manager={manager_ip} \
-        --name={agent_name} \
-        --password={WAZUH_ENROLLMENT_PASSWORD} \
-        --yes && \
-    systemctl daemon-reload && \
-    systemctl enable wazuh-agent && \
-    systemctl start wazuh-agent && \
-    rm -rf /var/monitoring
-    """
+    aggregated_cmd = (
+        f'iface=$(ip -o link | awk "/0a:01/ {{print \\$2; exit}}" | tr -d :) && '
+        f'ip -6 addr add {ipv6}/64 dev $iface && '
+        f'ip -6 route add default via {vrtmon_gw} && '
+        f'systemctl stop wazuh-agent 2>/dev/null || true && '
+        f'/var/monitoring/wazuh-agent/setup_wazuh.sh '
+        f'    --register '
+        f'    --manager={manager_ip} '
+        f'    --name={agent_name} '
+        f'    --password={WAZUH_ENROLLMENT_PASSWORD} '
+        f'    --yes && '
+        f'systemctl daemon-reload && '
+        f'systemctl enable wazuh-agent && '
+        f'systemctl start wazuh-agent'
+    )
 
     try:
         with GuestAgent(vmid=machine.id) as ga:
             result = ga.exec(aggregated_cmd, timeout=120)
     except GuestAgentError as e:
-        raise RuntimeError(f"Guest agent error while configuring Wazuh for VM {machine.id}: {e}") from e
+        raise RuntimeError(f"Guest agent error configuring Wazuh for VM {machine.id}: {e}") from e
 
     if not result:
-        raise RuntimeError(
-            f"Failed to configure Wazuh for VM {machine.id}: {result.stderr}"
-        )
+        raise RuntimeError(f"Wazuh config failed on VM {machine.id}: {result.stderr}")
+
+    launch_timing_logger(
+        full_start_time,
+        "[WAZUH FULL CONFIG COMPLETE]",
+        machine.challenge.template.id,
+        None,
+        VM_ID=machine.id,
+    )
+
+
+def configure_ipv6_and_wazuh_windows(machine, manager_ip="fd12:3456:789a:1::101"):
+    """
+    Configure IPv6 and register the Wazuh agent on a Windows VM via QEMU Guest Agent.
+
+    The setup_wazuh.ps1 script was already copied to the VM and the --install
+    phase already ran during import_machine_templates.  Here we only:
+      1. Assign the vrtmon IPv6 address to the vrtmon NIC (MAC prefix 0A:01).
+      2. Run setup_wazuh.ps1 --register with the per-challenge agent name and
+         Wazuh enrollment password.
+    """
+    ipv6 = vmid_to_ipv6(machine.id)
+    vrtmon_gw = "fd12:3456:789a:1::1"
+    agent_name = f"Agent_{machine.id}"
+
+    full_start_time = time.time()
+
+    # Step 1 — assign IPv6 to the vrtmon NIC
+    ipv6_cmd = (
+        '$mac = "0A:01"; '
+        '$nic = Get-NetAdapter | Where-Object { $_.MacAddress -like "$mac*" } | Select-Object -First 1; '
+        f'New-NetIPAddress -InterfaceIndex $nic.ifIndex -IPAddress "{ipv6}" -PrefixLength 64 -ErrorAction Stop; '
+        f'New-NetRoute -InterfaceIndex $nic.ifIndex -DestinationPrefix "::/0" -NextHop "{vrtmon_gw}" -ErrorAction Stop'
+    )
+
+    # Step 2 — register Wazuh agent
+    register_cmd = (
+        f'powershell.exe -ExecutionPolicy Bypass -File C:\\Windows\\Temp\\setup_wazuh.ps1 '
+        f'--register '
+        f'--manager={manager_ip} '
+        f'--name={agent_name} '
+        f'--password={WAZUH_ENROLLMENT_PASSWORD} '
+        f'--yes'
+    )
+
+    try:
+        with GuestAgent(vmid=machine.id, windows=True) as ga:
+            # Configure IPv6
+            result = ga.exec(
+                ["powershell.exe", "-ExecutionPolicy", "Bypass", "-Command", ipv6_cmd],
+                capture_output=True,
+                timeout=30,
+            )
+            if result.exit_code != 0:
+                raise RuntimeError(
+                    f"IPv6 config failed on Windows VM {machine.id} "
+                    f"(exit={result.exit_code}): {result.stderr.strip()!r}"
+                )
+            print(f"[Info] IPv6 configured on Windows VM {machine.id} ({ipv6})", flush=True)
+
+            # Register Wazuh
+            result = ga.exec(register_cmd, capture_output=True, timeout=120)
+            if result.exit_code != 0:
+                raise RuntimeError(
+                    f"Wazuh register failed on Windows VM {machine.id} "
+                    f"(exit={result.exit_code}): {result.stderr.strip()!r}"
+                )
+            print(f"[Info] Wazuh registered on Windows VM {machine.id} as {agent_name}", flush=True)
+
+    except GuestAgentError as e:
+        raise RuntimeError(f"Guest agent error while configuring Wazuh for Windows VM {machine.id}: {e}") from e
 
     launch_timing_logger(
         full_start_time,
