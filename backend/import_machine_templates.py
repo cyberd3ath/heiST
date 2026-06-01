@@ -438,8 +438,8 @@ runcmd:
 # ---------------------------------------------------------------------------
 
 # Host-side paths for the wazuh agent config directory
-_LINUX_AGENT_CONFIG_DIR  = "/root/heiST/monitoring/wazuh/agent"
-_WINDOWS_AGENT_CONFIG_DIR = "/root/heiST/monitoring/wazuh/agent"  # same source tree
+_LINUX_AGENT_CONFIG_DIR  = "/root/heiST/monitoring/wazuh/agent/linux"
+_WINDOWS_AGENT_CONFIG_DIR = "/root/heiST/monitoring/wazuh/agent/windows"  # same source tree
 
 # Guest-side destinations
 _LINUX_REMOTE_BASE   = "/var/monitoring/wazuh-agent"
