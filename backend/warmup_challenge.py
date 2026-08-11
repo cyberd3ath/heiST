@@ -450,7 +450,7 @@ def configure_ipv6_and_wazuh_windows(machine, manager_ip="fd12:3456:789a:1::101"
 
     # Step 2 — register Wazuh agent
     register_cmd = (
-        f'powershell.exe -ExecutionPolicy Bypass -File C:\\Windows\\Temp\\setup_wazuh.ps1 '
+        f'powershell.exe -ExecutionPolicy Bypass -File C:\\Windows\\Temp\\wazuh-agent\\setup_wazuh.ps1 '
         f'--register '
         f'--manager={manager_ip} '
         f'--name={agent_name} '

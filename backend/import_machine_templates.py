@@ -563,6 +563,7 @@ def configure_vms(challenge_template, ip_pool):
     """
     print(f"[Info] Starting VM configuration for {len(challenge_template.machine_templates)} machines", flush=True)
     vms_configured = 0
+    allocated_ips = {}  # machine_template.id -> allocated_ip, needed again in Phase 2
 
     # --- Phase 1: configure Proxmox side and launch ---
     for machine_template in challenge_template.machine_templates.values():
@@ -572,6 +573,7 @@ def configure_vms(challenge_template, ip_pool):
             allocated_ip = ip_pool.allocate_ip(machine_template.id)
             if not allocated_ip:
                 raise RuntimeError(f"Could not allocate IP for VM {machine_template.id}")
+            allocated_ips[machine_template.id] = allocated_ip
             print(f"[Debug] Allocated IP {allocated_ip} for VM {machine_template.id}", flush=True)
 
             # Temporary internet NIC so the guest can reach package repos / Wazuh manager
@@ -597,6 +599,7 @@ def configure_vms(challenge_template, ip_pool):
     vms_completed = 0
     for machine_template in challenge_template.machine_templates.values():
         try:
+            allocated_ip = allocated_ips[machine_template.id]
             if machine_template.guest_os == 'windows':
                 install_wazuh_windows(machine_template=machine_template, allocated_ip=allocated_ip)
             else:
@@ -659,8 +662,8 @@ def install_wazuh_linux(machine_template, allocated_ip,timeout=600):
 
         nic_cmd = (
             "iface=$(ip -o link | awk '/0a:00/ {print $2; exit}' | tr -d :) && "
-            "ip link set $iface up"
-            f"ip addr add {allocated_ip}/20 dev $iface"
+            "ip link set $iface up && "
+            f"ip addr add {allocated_ip}/20 dev $iface && "
             "ip route add default via 10.32.0.1"
         )
         result = ga.exec(nic_cmd, capture_output=True, timeout=30)
@@ -720,7 +723,7 @@ def install_wazuh_linux(machine_template, allocated_ip,timeout=600):
 # Windows install  (GA, no cloud-init)
 # ---------------------------------------------------------------------------
 
-def install_wazuh_windows(machine_template, timeout=900):
+def install_wazuh_windows(machine_template, allocated_ip, timeout=900):
     """
     Install Wazuh on a Windows VM via QEMU Guest Agent:
       1. Wait for GA (longer — Windows boots slower).
@@ -743,8 +746,8 @@ def install_wazuh_windows(machine_template, timeout=900):
 
         # Bring up temp NIC (MAC prefix 0A:00) via DHCP
         nic_cmd = (
-            '$nic = Get-NetAdapter | Where-Object { $_.MacAddress -like "0A:00*" } | Select-Object -First 1'
-            'New-NetIPAddress -InterfaceIndex $nic.ifIndex -IPAddress {allocated_ip} -PrefixLength 20 -DefaultGateway 10.32.0.1'
+            '$nic = Get-NetAdapter | Where-Object { $_.MacAddress -like "0A:00*" } | Select-Object -First 1; '
+            f'New-NetIPAddress -InterfaceIndex $nic.ifIndex -IPAddress {allocated_ip} -PrefixLength 20 -DefaultGateway 10.32.0.1'
         )
         result = ga.exec(
             ["powershell.exe", "-ExecutionPolicy", "Bypass", "-Command", nic_cmd],
