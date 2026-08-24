@@ -86,3 +86,20 @@ BEGIN
     WHERE id = p_ova_id AND user_id = p_user_id;
 END;
 $$;
+
+
+CREATE FUNCTION get_disk_file_id_for_user(
+    p_user_id BIGINT,
+    p_filename TEXT
+) RETURNS BIGINT
+LANGUAGE plpgsql
+SET plpgsql.variable_conflict = 'use_column'
+AS $$
+BEGIN
+    RETURN (
+        SELECT id FROM disk_files
+        WHERE display_name = p_filename AND user_id = p_user_id
+        LIMIT 1
+    )::BIGINT;
+END;
+$$;

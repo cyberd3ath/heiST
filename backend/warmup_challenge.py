@@ -140,7 +140,7 @@ def fetch_machines(challenge_template, db_conn):
         cursor.execute(
             "SELECT mt.id, df.guest_os "
             "FROM machine_templates mt "
-            "JOIN disk_files df ON df.proxmox_filename = mt.disk_file_path "
+            "JOIN disk_files df ON df.id = mt.disk_file_id "
             "WHERE mt.challenge_template_id = %s",
             (challenge_template.id,)
         )

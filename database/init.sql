@@ -491,7 +491,7 @@ CREATE TABLE machine_templates (
     id BIGINT PRIMARY KEY DEFAULT allocate_machine_template_id(),
     challenge_template_id BIGINT NOT NULL REFERENCES challenge_templates(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
-    disk_file_path TEXT NOT NULL,
+    disk_file_id BIGINT NOT NULL,
     cores BIGINT NOT NULL CHECK (cores > 0),
     ram_gb BIGINT NOT NULL CHECK (ram_gb > 0)
 );
@@ -608,6 +608,12 @@ CREATE TABLE disk_files (
 );
 
 
+ALTER TABLE machine_templates
+ADD CONSTRAINT fk_machine_templates_disk_file
+FOREIGN KEY (disk_file_id)
+REFERENCES disk_files(id) ON DELETE RESTRICT;
+
+
 CREATE TABLE machines
 (
     id BIGINT NOT NULL PRIMARY KEY DEFAULT allocate_machine_id(),
@@ -703,6 +709,7 @@ CREATE TABLE domains
 
 
 CREATE INDEX idx_machine_templates_challenge ON machine_templates(challenge_template_id);
+CREATE INDEX idx_machine_templates_disk_file ON machine_templates(disk_file_id);
 CREATE INDEX idx_domain_templates_machine ON domain_templates(machine_template_id);
 CREATE INDEX idx_network_connection_templates_machine ON network_connection_templates(machine_template_id);
 CREATE INDEX idx_network_connection_templates_network ON network_connection_templates(network_template_id);

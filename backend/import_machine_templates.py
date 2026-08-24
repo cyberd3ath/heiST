@@ -19,6 +19,8 @@ from backend.proxmox_api_calls import (
     delete_vm_api_call
 )
 
+PROXMOX_STORAGE_BASE_DIR = "/var/lib/vz/import"
+
 def import_machine_templates(challenge_template_id, db_conn, ip_pool):
     """
     Import a machine template from a disk image file and associate it with a challenge.
@@ -90,15 +92,17 @@ def fetch_machine_templates(challenge_template, db_conn):
 
     with db_conn.cursor() as cursor:
         cursor.execute(
-            "SELECT mt.id, mt.disk_file_path, mt.cores, mt.ram_gb, df.guest_os "
+            "SELECT mt.id, df.proxmox_filename, mt.cores, mt.ram_gb, df.guest_os "
             "FROM machine_templates mt "
-            "JOIN disk_files df ON df.proxmox_filename = mt.disk_file_path "
+            "JOIN disk_files df ON df.id = mt.disk_file_id "
             "WHERE mt.challenge_template_id = %s",
             (challenge_template.id,)
         )
 
-        for machine_template_id, disk_file_path, cores, ram_gb, guest_os in cursor.fetchall():
+        for machine_template_id, proxmox_filename, cores, ram_gb, guest_os in cursor.fetchall():
             print(f"[Debug] Processing machine template {machine_template_id} (guest_os={guest_os})", flush=True)
+
+            disk_file_path = os.path.join(PROXMOX_STORAGE_BASE_DIR, proxmox_filename)
 
             # Check if the disk file path is valid
             if not os.path.exists(disk_file_path):
@@ -797,3 +801,70 @@ def install_wazuh_windows(machine_template, allocated_ip, timeout=900):
             time.sleep(15)
 
     raise TimeoutError(f"Windows setup did not complete within {timeout}s for VM {machine_template.id}")
+
+def convert_machine_template_vms_to_templates(challenge_template):
+    """
+    Convert the VM to a template in Proxmox.
+    """
+    print(f"[Info] Converting {len(challenge_template.machine_templates)} VMs to Proxmox templates", flush=True)
+    templates_converted = 0
+
+    for machine_template in challenge_template.machine_templates.values():
+        try:
+            print(f"[Info] Converting VM {machine_template.id} to template", flush=True)
+            convert_vm_to_template_api_call(machine_template.id)
+            templates_converted += 1
+            print(f"[Info] Successfully converted VM {machine_template.id} to template", flush=True)
+        except Exception as e:
+            print(f"[Error] Failed to convert VM {machine_template.id} to template: {e}", flush=True)
+            raise RuntimeError(f"Failed to convert VM to template: {e}")
+
+    print(f"[Info] Successfully converted {templates_converted} VMs to templates", flush=True)
+
+
+def mark_challenge_template_as_ready(challenge_template, db_conn):
+    """
+    Mark the challenge template as ready in the database.
+    """
+    print(f"[Info] Marking challenge template {challenge_template.id} as ready_to_launch in database", flush=True)
+
+    with db_conn.cursor() as cursor:
+        cursor.execute("UPDATE challenge_templates SET ready_to_launch = TRUE WHERE id = %s", (challenge_template.id,))
+        db_conn.commit()
+
+    print(f"[Info] Challenge template {challenge_template.id} successfully marked as ready", flush=True)
+
+
+def undo_import_machine_templates(challenge_template):
+    """
+    Undo the import of machine templates.
+    """
+    print(f"[Error] Undoing machine template import for challenge {challenge_template.id}", flush=True)
+    vms_deleted = 0
+
+    for machine_template in challenge_template.machine_templates.values():
+        try:
+            print(f"[Info] Attempting to delete VM {machine_template.id}", flush=True)
+            delete_vm_api_call(machine_template)
+            vms_deleted += 1
+            print(f"[Info] Successfully deleted VM {machine_template.id}", flush=True)
+        except Exception as e:
+            print(f"[Warning] Failed to delete VM {machine_template.id} via API: {e}", flush=True)
+            try:
+                print(f"[Debug] Attempting to unlock VM {machine_template.id}", flush=True)
+                subprocess.run(["qm", "unlock", str(machine_template.id)], check=True, capture_output=True)
+            except Exception:
+                pass
+            try:
+                subprocess.run(["qm", "stop", str(machine_template.id)], check=True, capture_output=True)
+            except Exception:
+                pass
+            try:
+                print(f"[Debug] Attempting to destroy VM {machine_template.id}", flush=True)
+                subprocess.run(["qm", "destroy", str(machine_template.id), "--skiplock"], check=True, capture_output=True)
+                vms_deleted += 1
+                print(f"[Info] Successfully destroyed VM {machine_template.id}", flush=True)
+            except Exception as e3:
+                print(f"[Warning] Failed to destroy VM {machine_template.id}: {e3}", flush=True)
+
+    print(f"[Info] Cleanup completed - {vms_deleted} VMs deleted during undo process", flush=True)
