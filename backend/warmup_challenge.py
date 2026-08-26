@@ -442,7 +442,7 @@ def configure_ipv6_and_wazuh_windows(machine, manager_ip="fd12:3456:789a:1::101"
 
     # Step 1 — assign IPv6 to the vrtmon NIC
     ipv6_cmd = (
-        '$mac = "0A:01"; '
+        '$mac = "0A-01"; '
         '$nic = Get-NetAdapter | Where-Object { $_.MacAddress -like "$mac*" } | Select-Object -First 1; '
         f'New-NetIPAddress -InterfaceIndex $nic.ifIndex -IPAddress "{ipv6}" -PrefixLength 64 -ErrorAction Stop; '
         f'New-NetRoute -InterfaceIndex $nic.ifIndex -DestinationPrefix "::/0" -NextHop "{vrtmon_gw}" -ErrorAction Stop'
@@ -451,11 +451,11 @@ def configure_ipv6_and_wazuh_windows(machine, manager_ip="fd12:3456:789a:1::101"
     # Step 2 — register Wazuh agent
     register_cmd = (
         f'powershell.exe -ExecutionPolicy Bypass -File C:\\Windows\\Temp\\wazuh-agent\\setup_wazuh.ps1 '
-        f'--register '
-        f'--manager={manager_ip} '
-        f'--name={agent_name} '
-        f'--password={WAZUH_ENROLLMENT_PASSWORD} '
-        f'--yes'
+        f'-Register '
+        f'-Manager {manager_ip} '
+        f'-Name {agent_name} '
+        f'-Password {WAZUH_ENROLLMENT_PASSWORD} '
+        f'-Yes'
     )
 
     try:

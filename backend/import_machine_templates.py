@@ -453,6 +453,9 @@ _WINDOWS_REMOTE_BASE = r"C:\Windows\Temp\wazuh-agent"
 _LINUX_SETUP_FLAG   = "/var/run/wazuh-setup-complete.flag"
 _WINDOWS_SETUP_FLAG = r"C:\Windows\Temp\wazuh-setup-complete.flag"
 
+# DNS servers to configure on the temp NIC (New-NetIPAddress does not set DNS)
+_DNS_SERVERS = ("8.8.8.8", "1.1.1.1")
+
 
 # ---------------------------------------------------------------------------
 # File staging helper (shared by both OSes)
@@ -524,10 +527,10 @@ def _copy_agent_files_windows(ga, config_dir, remote_base, vmid):
         remote_dir  = remote_path.rsplit("\\", 1)[0]
 
         ga.exec(
-            ["powershell.exe", "-ExecutionPolicy", "Bypass", "-Command",
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
              f'New-Item -ItemType Directory -Force -Path "{remote_dir}" | Out-Null'],
             capture_output=False,
-            timeout=10,
+            timeout=45,
         )
 
         with open(abs_path, "rb") as f:
@@ -750,13 +753,16 @@ def install_wazuh_windows(machine_template, allocated_ip, timeout=900):
 
         # Bring up temp NIC (MAC prefix 0A:00) via DHCP
         nic_cmd = (
-            '$nic = Get-NetAdapter | Where-Object { $_.MacAddress -like "0A:00*" } | Select-Object -First 1; '
-            f'New-NetIPAddress -InterfaceIndex $nic.ifIndex -IPAddress {allocated_ip} -PrefixLength 20 -DefaultGateway 10.32.0.1'
+            '$nic = Get-NetAdapter | Where-Object { $_.MacAddress -like "0A-00*" } | Select-Object -First 1; '
+            'Remove-NetIPAddress -InterfaceIndex $nic.ifIndex -AddressFamily IPv4 -Confirm:$false -ErrorAction SilentlyContinue; '
+            'Remove-NetRoute -InterfaceIndex $nic.ifIndex -DestinationPrefix "0.0.0.0/0" -Confirm:$false -ErrorAction SilentlyContinue; '
+            f'New-NetIPAddress -InterfaceIndex $nic.ifIndex -IPAddress {allocated_ip} -PrefixLength 20 -DefaultGateway 10.32.0.1; '
+            f'Set-DnsClientServerAddress -InterfaceIndex $nic.ifIndex -ServerAddresses ("{_DNS_SERVERS[0]}","{_DNS_SERVERS[1]}")'
         )
         result = ga.exec(
-            ["powershell.exe", "-ExecutionPolicy", "Bypass", "-Command", nic_cmd],
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", nic_cmd],
             capture_output=True,
-            timeout=30,
+            timeout=45,
         )
         if result.exit_code != 0:
             print(f"[Warning] NIC setup non-zero on Windows VM {machine_template.id}: {result.stderr.strip()!r}", flush=True)
@@ -768,7 +774,7 @@ def install_wazuh_windows(machine_template, allocated_ip, timeout=900):
         ps1_remote = _WINDOWS_REMOTE_BASE + "\\setup_wazuh.ps1"
         print(f"[Info] Running setup_wazuh.ps1 --install on VM {machine_template.id}", flush=True)
         result = ga.exec(
-            ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", ps1_remote, "--install", "--yes"],
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1_remote, "--install", "--yes"],
             capture_output=True,
             timeout=_INSTALL_TIMEOUT,
         )
@@ -784,7 +790,7 @@ def install_wazuh_windows(machine_template, allocated_ip, timeout=900):
             elapsed = int(time.monotonic() - start_time)
             try:
                 flag_result = ga.exec(
-                    ["powershell.exe", "-ExecutionPolicy", "Bypass", "-Command",
+                    ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
                      f'if (Test-Path "{_WINDOWS_SETUP_FLAG}") {{ exit 0 }} else {{ exit 1 }}'],
                     capture_output=False,
                     timeout=_FAST_TIMEOUT,
