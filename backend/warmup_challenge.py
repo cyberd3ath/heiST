@@ -444,8 +444,12 @@ def configure_ipv6_and_wazuh_windows(machine, manager_ip="fd12:3456:789a:1::101"
     ipv6_cmd = (
         '$mac = "0A-01"; '
         '$nic = Get-NetAdapter | Where-Object { $_.MacAddress -like "$mac*" } | Select-Object -First 1; '
-        f'New-NetIPAddress -InterfaceIndex $nic.ifIndex -IPAddress "{ipv6}" -PrefixLength 64 -ErrorAction Stop; '
-        f'New-NetRoute -InterfaceIndex $nic.ifIndex -DestinationPrefix "::/0" -NextHop "{vrtmon_gw}" -ErrorAction Stop'
+        f'if (-not (Get-NetIPAddress -InterfaceIndex $nic.ifIndex -AddressFamily IPv6 '
+        f'-IPAddress "{ipv6}" -ErrorAction SilentlyContinue)) '
+        f'{{ New-NetIPAddress -InterfaceIndex $nic.ifIndex -IPAddress "{ipv6}" -PrefixLength 64 -ErrorAction Stop }}; '
+        f'if (-not (Get-NetRoute -InterfaceIndex $nic.ifIndex -DestinationPrefix "::/0" '
+        f'-NextHop "{vrtmon_gw}" -ErrorAction SilentlyContinue)) '
+        f'{{ New-NetRoute -InterfaceIndex $nic.ifIndex -DestinationPrefix "::/0" -NextHop "{vrtmon_gw}" -ErrorAction Stop }}'
     )
 
     # Step 2 — register Wazuh agent
@@ -464,7 +468,7 @@ def configure_ipv6_and_wazuh_windows(machine, manager_ip="fd12:3456:789a:1::101"
             result = ga.exec(
                 ["powershell.exe", "-ExecutionPolicy", "Bypass", "-Command", ipv6_cmd],
                 capture_output=True,
-                timeout=30,
+                timeout=120,
             )
             if result.exit_code != 0:
                 raise RuntimeError(
@@ -474,7 +478,19 @@ def configure_ipv6_and_wazuh_windows(machine, manager_ip="fd12:3456:789a:1::101"
             print(f"[Info] IPv6 configured on Windows VM {machine.id} ({ipv6})", flush=True)
 
             # Register Wazuh
-            result = ga.exec(register_cmd, capture_output=True, timeout=120)
+            result = ga.exec(
+                [
+                    "powershell.exe", "-ExecutionPolicy", "Bypass",
+                    "-File", r"C:\Windows\Temp\wazuh-agent\setup_wazuh.ps1",
+                    "-Register",
+                    "-Manager", manager_ip,
+                    "-Name", agent_name,
+                    "-Password", WAZUH_ENROLLMENT_PASSWORD,
+                    "-Yes",
+                ],
+                capture_output=True,
+                timeout=120,
+            )
             if result.exit_code != 0:
                 raise RuntimeError(
                     f"Wazuh register failed on Windows VM {machine.id} "

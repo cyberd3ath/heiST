@@ -451,7 +451,7 @@ _WINDOWS_REMOTE_BASE = r"C:\Windows\Temp\wazuh-agent"
 
 # Completion flags (written by the setup scripts themselves)
 _LINUX_SETUP_FLAG   = "/var/run/wazuh-setup-complete.flag"
-_WINDOWS_SETUP_FLAG = r"C:\Windows\Temp\wazuh-setup-complete.flag"
+_WINDOWS_SETUP_FLAG = r"C:\ProgramData\WazuhSetup\wazuh-setup-complete.flag"
 
 # DNS servers to configure on the temp NIC (New-NetIPAddress does not set DNS)
 _DNS_SERVERS = ("8.8.8.8", "1.1.1.1")

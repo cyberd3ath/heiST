@@ -460,8 +460,8 @@ class GuestAgent:
         """Execute a command on a Windows guest.
 
         Attempts direct ``guest-exec`` first.  If the process is PowerShell
-        and returns no output with a non-zero exit code the call is
-        retried wrapped in ``cmd.exe /c start /wait /MIN`` to supply a window handle.
+        and returns no output with a non-zero exit code, or hangs and never exits within the timeout, the call is retried
+        wrapped in ``cmd.exe /c start /wait /MIN`` to supply a window handle.
         """
         is_ps = argv[0].lower().endswith("powershell.exe")
         command, args = argv[0], argv[1:]
@@ -477,7 +477,6 @@ class GuestAgent:
             )
             if result.exit_code == 0:
                 return result
-            # PS with no output is a console-handle crash on legacy Windows -> retry
             if is_ps and not result.stdout and not result.stderr:
                 pass
             else:
@@ -485,6 +484,13 @@ class GuestAgent:
         except GACommandError:
             if not is_ps:
                 raise
+        except GATimeoutError:
+            if not is_ps:
+                raise
+            logger.warning(
+                "PowerShell exec hung, retrying wrapped: %r",
+                argv,
+            )
 
         wrapped = _wrap_for_windows(command, args)
         return self._exec_socket(
@@ -495,7 +501,6 @@ class GuestAgent:
             poll_interval=0.5,
             env=None,
         )
-
 
     def read_file(self, guest_path: str, *, chunk_size: int = 65536) -> bytes:
         """Read a file from inside the guest and return its contents."""
