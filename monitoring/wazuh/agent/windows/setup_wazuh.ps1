@@ -223,9 +223,18 @@ function Ensure-WazuhService {
 
         print_info "Executing: wazuh-agent.exe install-service"
 
-        & $agentExe install-service 2>&1 | ForEach-Object {
-            if ($_ -ne $null -and $_.ToString().Trim() -ne "") {
-                print_info "  $($_.ToString())"
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $installOutput = & $agentExe install-service 2>&1
+        }
+        finally {
+            $ErrorActionPreference = $prevEAP
+        }
+
+        foreach ($line in $installOutput) {
+            if ($line -ne $null -and $line.ToString().Trim() -ne "") {
+                print_info "  $($line.ToString())"
             }
         }
 
@@ -906,14 +915,18 @@ if ($Mode -eq "full" -or $Mode -eq "register" -or $Reregister) {
     }
 
     if (-not $ok) { print_error "Registration failed. Please check the messages above." }
-    if ($Mode -eq "register") { print_info "Agent registered. Use -Run to start it." }
+    if ($Mode -eq "register") { print_info "Agent registered. Starting service..." }
 }
 
 # START
-if ($Mode -eq "full" -or $Mode -eq "run" -or $Reregister) {
+if ($Mode -eq "full" -or $Mode -eq "run" -or $Mode -eq "register" -or $Reregister) {
     print_info "Starting Wazuh service..."
 
     try {
+        if (-not (Ensure-WazuhService)) {
+            throw "WazuhSvc does not exist and could not be re-registered."
+        }
+
         $service = Get-Service -Name "WazuhSvc" -ErrorAction Stop
 
         print_info "WazuhSvc found. Current status: $($service.Status)"

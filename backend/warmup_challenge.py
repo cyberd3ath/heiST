@@ -452,16 +452,6 @@ def configure_ipv6_and_wazuh_windows(machine, manager_ip="fd12:3456:789a:1::101"
         f'{{ New-NetRoute -InterfaceIndex $nic.ifIndex -DestinationPrefix "::/0" -NextHop "{vrtmon_gw}" -ErrorAction Stop }}'
     )
 
-    # Step 2 — register Wazuh agent
-    register_cmd = (
-        f'powershell.exe -ExecutionPolicy Bypass -File C:\\Windows\\Temp\\wazuh-agent\\setup_wazuh.ps1 '
-        f'-Register '
-        f'-Manager {manager_ip} '
-        f'-Name {agent_name} '
-        f'-Password {WAZUH_ENROLLMENT_PASSWORD} '
-        f'-Yes'
-    )
-
     try:
         with GuestAgent(vmid=machine.id, windows=True) as ga:
             # Configure IPv6
@@ -496,7 +486,7 @@ def configure_ipv6_and_wazuh_windows(machine, manager_ip="fd12:3456:789a:1::101"
                     f"Wazuh register failed on Windows VM {machine.id} "
                     f"(exit={result.exit_code}): {result.stderr.strip()!r}"
                 )
-            print(f"[Info] Wazuh registered on Windows VM {machine.id} as {agent_name}", flush=True)
+            print(f"[Info] Wazuh registered and started on Windows VM {machine.id} as {agent_name}", flush=True)
 
     except GuestAgentError as e:
         raise RuntimeError(f"Guest agent error while configuring Wazuh for Windows VM {machine.id}: {e}") from e
