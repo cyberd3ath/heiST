@@ -95,7 +95,12 @@ if (-not $PSBoundParameters.ContainsKey('UseAdMonitoring')) {
 # Install: download + run the MSI
 # ============================================================
 function Install-WazuhAgent {
-    param([string]$ManagerIp, [string]$AgentName, [string]$EnrollPassword, [string]$Version)
+    param(
+        [string]$ManagerIp,
+        [string]$AgentName,
+        [string]$EnrollPassword,
+        [string]$Version
+    )
 
     print_info "Installing Wazuh Agent $Version..."
     print_info "  Manager: $ManagerIp"
@@ -103,33 +108,152 @@ function Install-WazuhAgent {
 
     $installerUrl  = "https://packages.wazuh.com/4.x/windows/wazuh-agent-$Version-1.msi"
     $installerPath = "$env:TEMP\wazuh-agent.msi"
+    $msiLogPath    = Join-Path $LogDir "wazuh_msi.log"
 
     try {
         print_info "  Downloading installer..."
+        print_info "  URL: $installerUrl"
+
         if ($PSVersion -eq 2) {
             $webClient = New-Object System.Net.WebClient
             $webClient.DownloadFile($installerUrl, $installerPath)
-        } else {
-            Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing
+        }
+        else {
+            Invoke-WebRequest `
+                -Uri $installerUrl `
+                -OutFile $installerPath `
+                -UseBasicParsing
         }
 
-        $arguments = "/i `"$installerPath`" /q"
-        if ($ManagerIp)   { $arguments += " WAZUH_MANAGER=`"$ManagerIp`"" }
-        if ($AgentName)   { $arguments += " WAZUH_AGENT_NAME=`"$AgentName`"" }
+        if (-not (Test-Path $installerPath)) {
+            throw "Wazuh MSI was not downloaded to $installerPath"
+        }
+
+        print_info "  MSI downloaded successfully."
+
+        $arguments = "/i `"$installerPath`" /qn /l*v `"$msiLogPath`""
+
+        if ($ManagerIp) {
+            $arguments += " WAZUH_MANAGER=`"$ManagerIp`""
+        }
+
+        if ($AgentName) {
+            $arguments += " WAZUH_AGENT_NAME=`"$AgentName`""
+        }
+
         if ($EnrollPassword -ne "") {
             $arguments += " WAZUH_REGISTRATION_PASSWORD=`"$EnrollPassword`""
             print_info "  Using enrollment password"
         }
 
         print_info "  Running installer..."
-        Start-Process msiexec.exe -ArgumentList $arguments -Wait -NoNewWindow
+        print_info "  MSI log: $msiLogPath"
+
+        $process = Start-Process `
+            msiexec.exe `
+            -ArgumentList $arguments `
+            -Wait `
+            -NoNewWindow `
+            -PassThru
+
+        $exitCode = $process.ExitCode
+
+        print_info "  MSI exit code: $exitCode"
+
+        if ($exitCode -ne 0) {
+            throw "Wazuh MSI installation failed with exit code $exitCode. Check $msiLogPath"
+        }
+
+        print_info "  MSI installation completed successfully."
 
         Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
-        print_info "Wazuh agent installed"
+
+        $agentExe = Join-Path $OssecDir "wazuh-agent.exe"
+
+        if (-not (Test-Path $agentExe)) {
+            throw "MSI completed successfully but wazuh-agent.exe was not found at $agentExe"
+        }
+
+        print_info "  Found wazuh-agent.exe"
+
+        if (-not (Ensure-WazuhService)) {
+            throw "Wazuh agent files were installed but WazuhSvc could not be registered."
+        }
+
+        print_info "Wazuh agent installation completed successfully."
+        print_info "WazuhSvc is available."
     }
     catch {
         print_error "Failed to install Wazuh agent: $_"
-        exit 1
+
+        if (Test-Path $msiLogPath) {
+            print_error "Detailed MSI log available at:"
+            print_error "  $msiLogPath"
+        }
+
+        Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+
+        throw
+    }
+}
+
+function Ensure-WazuhService {
+    print_info "Checking Wazuh Windows service..."
+
+    $service = Get-Service -Name "WazuhSvc" -ErrorAction SilentlyContinue
+
+    if ($service) {
+        print_info "WazuhSvc already exists. Status: $($service.Status)"
+        return $true
+    }
+
+    print_warning "WazuhSvc does not exist."
+    print_info "Attempting to register Wazuh service using wazuh-agent.exe..."
+
+    $agentExe = Join-Path $OssecDir "wazuh-agent.exe"
+
+    if (-not (Test-Path $agentExe)) {
+        print_error "Cannot register WazuhSvc because wazuh-agent.exe was not found:"
+        print_error "  $agentExe"
+        return $false
+    }
+
+    try {
+        Push-Location $OssecDir
+
+        print_info "Executing: wazuh-agent.exe install-service"
+
+        & $agentExe install-service 2>&1 | ForEach-Object {
+            if ($_ -ne $null -and $_.ToString().Trim() -ne "") {
+                print_info "  $($_.ToString())"
+            }
+        }
+
+        $exitCode = $LASTEXITCODE
+
+        Pop-Location
+
+        if ($exitCode -ne 0) {
+            print_error "wazuh-agent.exe install-service failed with exit code $exitCode"
+            return $false
+        }
+
+        Start-Sleep -Milliseconds 500
+
+        $service = Get-Service -Name "WazuhSvc" -ErrorAction SilentlyContinue
+
+        if (-not $service) {
+            print_error "install-service completed but WazuhSvc was not found."
+            return $false
+        }
+
+        print_info "WazuhSvc successfully registered."
+        return $true
+    }
+    catch {
+        Pop-Location -ErrorAction SilentlyContinue
+        print_error "Failed to register WazuhSvc: $_"
+        return $false
     }
 }
 
@@ -788,14 +912,34 @@ if ($Mode -eq "full" -or $Mode -eq "register" -or $Reregister) {
 # START
 if ($Mode -eq "full" -or $Mode -eq "run" -or $Reregister) {
     print_info "Starting Wazuh service..."
+
     try {
-        Start-Service WazuhSvc
-        Set-Service WazuhSvc -StartupType Automatic
-        print_info "Wazuh Agent is now running!"
-    } catch {
+        $service = Get-Service -Name "WazuhSvc" -ErrorAction Stop
+
+        print_info "WazuhSvc found. Current status: $($service.Status)"
+
+        if ($service.Status -ne "Running") {
+            Start-Service -Name "WazuhSvc"
+        }
+
+        Set-Service -Name "WazuhSvc" -StartupType Automatic
+
+        $service = Get-Service -Name "WazuhSvc" -ErrorAction Stop
+
+        if ($service.Status -eq "Running") {
+            print_info "Wazuh Agent is now running!"
+            print_info "WazuhSvc startup type: Automatic"
+        }
+        else {
+            print_error "WazuhSvc exists but is not running."
+            print_error "Current status: $($service.Status)"
+        }
+    }
+    catch {
         print_error "Failed to start WazuhSvc: $_"
     }
 }
+
 
 print_info "Wazuh Agent setup finished! (Mode: $Mode)"
 New-Item -Path "C:\ProgramData\WazuhSetup\wazuh-setup-complete.flag" -ItemType File -Force | Out-Null
