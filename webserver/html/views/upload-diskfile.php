@@ -1,17 +1,17 @@
 <?php
 declare(strict_types=1);
-//require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__ . '/../vendor/autoload.php';
 
-//$securityHelper = new SecurityHelper();
-//$securityHelper->initSecureSession();
+$securityHelper = new SecurityHelper();
+$securityHelper->initSecureSession();
 
-//$databaseHelper = new DatabaseHelper();
-//$pdo = $databaseHelper->getPDO();
+$databaseHelper = new DatabaseHelper();
+$pdo = $databaseHelper->getPDO();
 
-//if (!$securityHelper->validateSession() || !$securityHelper->validateAdminAccess($pdo)) {
-//    header('Location: /404');
-//    exit();
-//}
+if (!$securityHelper->validateSession() || !$securityHelper->validateAdminAccess($pdo)) {
+    header('Location: /404');
+    exit();
+}
 ?>
 
 <!DOCTYPE html>

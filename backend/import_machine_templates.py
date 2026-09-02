@@ -20,6 +20,16 @@ from backend.proxmox_api_calls import (
 )
 
 PROXMOX_STORAGE_BASE_DIR = "/var/lib/vz/import"
+_LINUX_AGENT_CONFIG_DIR  = "/root/heiST/monitoring/wazuh/agent/linux"
+_WINDOWS_AGENT_CONFIG_DIR = "/root/heiST/monitoring/wazuh/agent/windows"
+
+_LINUX_REMOTE_BASE   = "/var/monitoring/wazuh-agent"
+_WINDOWS_REMOTE_BASE = r"C:\Windows\Temp\wazuh-agent"
+
+_LINUX_SETUP_FLAG   = "/var/run/wazuh-setup-complete.flag"
+_WINDOWS_SETUP_FLAG = r"C:\ProgramData\WazuhSetup\wazuh-setup-complete.flag"
+
+_DNS_SERVERS = ("8.8.8.8", "1.1.1.1")
 
 def import_machine_templates(challenge_template_id, db_conn, ip_pool):
     """
@@ -437,38 +447,9 @@ runcmd:
     return "local:snippets/user-data.yaml"
 
 
-# ---------------------------------------------------------------------------
-# Shared constants
-# ---------------------------------------------------------------------------
-
-# Host-side paths for the wazuh agent config directory
-_LINUX_AGENT_CONFIG_DIR  = "/root/heiST/monitoring/wazuh/agent/linux"
-_WINDOWS_AGENT_CONFIG_DIR = "/root/heiST/monitoring/wazuh/agent/windows"  # same source tree
-
-# Guest-side destinations
-_LINUX_REMOTE_BASE   = "/var/monitoring/wazuh-agent"
-_WINDOWS_REMOTE_BASE = r"C:\Windows\Temp\wazuh-agent"
-
-# Completion flags (written by the setup scripts themselves)
-_LINUX_SETUP_FLAG   = "/var/run/wazuh-setup-complete.flag"
-_WINDOWS_SETUP_FLAG = r"C:\ProgramData\WazuhSetup\wazuh-setup-complete.flag"
-
-# DNS servers to configure on the temp NIC (New-NetIPAddress does not set DNS)
-_DNS_SERVERS = ("8.8.8.8", "1.1.1.1")
-
-
-# ---------------------------------------------------------------------------
-# File staging helper (shared by both OSes)
-# ---------------------------------------------------------------------------
-
 def _collect_agent_files(config_dir):
     """
-    Walk config_dir and return a list of (local_abs_path, rel_path) tuples,
-    mirroring what cloud-init used to embed.  Includes:
-      - everything under config_dir/config/**
-      - setup_wazuh.sh  (Linux)
-      - setup_wazuh.ps1 (Windows)
-    Both scripts are included if present; callers just write what exists.
+    Walk config_dir and return a list of (local_abs_path, rel_path) tuples
     """
     files = []
 
@@ -490,8 +471,7 @@ def _collect_agent_files(config_dir):
 
 def _copy_agent_files_linux(ga, config_dir, remote_base, vmid):
     """
-    Copy all agent files to a Linux guest via GA, preserving the relative
-    directory structure under remote_base.  Directories are created with mkdir -p.
+    Copy all agent files to a Linux guest via GA, preserving the relative directory structure under remote_base.
     """
     files = _collect_agent_files(config_dir)
     print(f"[Info] Copying {len(files)} agent files to Linux VM {vmid}", flush=True)
@@ -507,7 +487,6 @@ def _copy_agent_files_linux(ga, config_dir, remote_base, vmid):
         ga.write_file(remote_path, data)
         print(f"[Debug] Wrote {rel_path} -> {remote_path} on VM {vmid}", flush=True)
 
-    # Ensure setup_wazuh.sh is executable
     setup_sh = remote_base + "/setup_wazuh.sh"
     ga.exec(["chmod", "+x", setup_sh], capture_output=False, timeout=10)
     print(f"[Info] Agent files staged on Linux VM {vmid}", flush=True)
@@ -515,9 +494,7 @@ def _copy_agent_files_linux(ga, config_dir, remote_base, vmid):
 
 def _copy_agent_files_windows(ga, config_dir, remote_base, vmid):
     """
-    Copy all agent files to a Windows guest via GA, preserving the relative
-    directory structure under remote_base.  Directories are created with
-    New-Item -ItemType Directory -Force.
+    Copy all agent files to a Windows guest via GA, preserving the relative directory structure under remote_base.
     """
     files = _collect_agent_files(config_dir)
     print(f"[Info] Copying {len(files)} agent files to Windows VM {vmid}", flush=True)
@@ -541,10 +518,6 @@ def _copy_agent_files_windows(ga, config_dir, remote_base, vmid):
     print(f"[Info] Agent files staged on Windows VM {vmid}", flush=True)
 
 
-# ---------------------------------------------------------------------------
-# Shared GA boot-wait helper
-# ---------------------------------------------------------------------------
-
 def _wait_for_ga(ga, vmid, ping_timeout, poll_interval=2):
     ping_deadline = time.monotonic() + ping_timeout
     while not ga.ping():
@@ -556,23 +529,14 @@ def _wait_for_ga(ga, vmid, ping_timeout, poll_interval=2):
     print(f"[Info] GA responsive on VM {vmid}", flush=True)
 
 
-# ---------------------------------------------------------------------------
-# configure_vms  (orchestrator — identical flow for both OSes)
-# ---------------------------------------------------------------------------
-
 def configure_vms(challenge_template, ip_pool):
     """
-    Configure VMs with proper IP pool management.
-    Both Linux and Windows use the same phases:
-      1. Attach temp NIC (net30), apply base Proxmox config, launch.
-      2. Wait for GA, stage files, run --install, poll flag, shutdown, detach NIC.
-    No cloud-init involved for either OS.
+    Configure VMs with proper IP pool management
     """
     print(f"[Info] Starting VM configuration for {len(challenge_template.machine_templates)} machines", flush=True)
     vms_configured = 0
-    allocated_ips = {}  # machine_template.id -> allocated_ip, needed again in Phase 2
+    allocated_ips = {}
 
-    # --- Phase 1: configure Proxmox side and launch ---
     for machine_template in challenge_template.machine_templates.values():
         try:
             print(f"[Info] Configuring machine template {machine_template.id} (guest_os={machine_template.guest_os})", flush=True)
@@ -583,11 +547,9 @@ def configure_vms(challenge_template, ip_pool):
             allocated_ips[machine_template.id] = allocated_ip
             print(f"[Debug] Allocated IP {allocated_ip} for VM {machine_template.id}", flush=True)
 
-            # Temporary internet NIC so the guest can reach package repos / Wazuh manager
             add_network_device_api_call(machine_template.id)
             print(f"[Debug] Temporary cloud NIC attached to VM {machine_template.id}", flush=True)
 
-            # Set CPU / RAM only — no cloud-init, no ipconfig (NIC brought up via GA)
             initial_configuration_api_call(machine_template)
             print(f"[Debug] Base Proxmox config applied for VM {machine_template.id}", flush=True)
 
@@ -602,7 +564,6 @@ def configure_vms(challenge_template, ip_pool):
 
     print(f"[Info] Launched {vms_configured} VMs, starting GA-based setup", flush=True)
 
-    # --- Phase 2: GA setup, shutdown, cleanup ---
     vms_completed = 0
     for machine_template in challenge_template.machine_templates.values():
         try:
@@ -642,19 +603,11 @@ def configure_vms(challenge_template, ip_pool):
     print(f"[Info] Successfully configured {vms_completed} VMs", flush=True)
 
 
-# ---------------------------------------------------------------------------
-# Linux install  (GA, no cloud-init)
-# ---------------------------------------------------------------------------
-
 def install_wazuh_linux(machine_template, allocated_ip,timeout=600):
     """
-    Install Wazuh on a Linux VM via QEMU Guest Agent:
-      1. Wait for GA.
-      2. Bring up temp NIC via dhclient.
-      3. Stage agent files (setup_wazuh.sh + config/) via GA file-write.
-      4. Run setup_wazuh.sh --install --yes.
-      5. Poll for completion flag + bash_loggin_timer.
+    Install Wazuh on a Linux VM via QEMU Guest Agent
     """
+
     _PING_TIMEOUT    = 120
     _INSTALL_TIMEOUT = max(timeout - 60, 120)
     _FAST_TIMEOUT    = 15
@@ -677,10 +630,8 @@ def install_wazuh_linux(machine_template, allocated_ip,timeout=600):
         if result.exit_code != 0:
             print(f"[Warning] NIC setup non-zero on VM {machine_template.id}: {result.stderr.strip()!r}", flush=True)
 
-        # Stage all agent files via GA
         _copy_agent_files_linux(ga, _LINUX_AGENT_CONFIG_DIR, _LINUX_REMOTE_BASE, machine_template.id)
 
-        # Run install phase
         install_cmd = (
             f"{_LINUX_REMOTE_BASE}/setup_wazuh.sh --install --yes"
         )
@@ -693,7 +644,6 @@ def install_wazuh_linux(machine_template, allocated_ip,timeout=600):
             )
         print(f"[Info] setup_wazuh.sh --install completed on VM {machine_template.id}", flush=True)
 
-        # Poll for completion flag + systemd timer
         while time.monotonic() < deadline:
             elapsed = int(time.monotonic() - start_time)
             try:
@@ -726,18 +676,9 @@ def install_wazuh_linux(machine_template, allocated_ip,timeout=600):
     raise TimeoutError(f"Linux setup did not complete within {timeout}s for VM {machine_template.id}")
 
 
-# ---------------------------------------------------------------------------
-# Windows install  (GA, no cloud-init)
-# ---------------------------------------------------------------------------
-
 def install_wazuh_windows(machine_template, allocated_ip, timeout=900):
     """
-    Install Wazuh on a Windows VM via QEMU Guest Agent:
-      1. Wait for GA (longer — Windows boots slower).
-      2. Bring up temp NIC via DHCP using PowerShell.
-      3. Stage agent files (setup_wazuh.ps1 + config/) via GA file-write.
-      4. Run setup_wazuh.ps1 --install --yes.
-      5. Poll for completion flag.
+    Install Wazuh on a Windows VM via QEMU Guest Agent
     """
     _PING_TIMEOUT    = 180
     _INSTALL_TIMEOUT = max(timeout - 120, 300)
@@ -751,7 +692,6 @@ def install_wazuh_windows(machine_template, allocated_ip, timeout=900):
     with GuestAgent(vmid=machine_template.id, windows=True) as ga:
         _wait_for_ga(ga, machine_template.id, _PING_TIMEOUT, poll_interval=5)
 
-        # Bring up temp NIC (MAC prefix 0A:00) via DHCP
         nic_cmd = (
             '$nic = Get-NetAdapter | Where-Object { $_.MacAddress -like "0A-00*" } | Select-Object -First 1; '
             'Remove-NetIPAddress -InterfaceIndex $nic.ifIndex -AddressFamily IPv4 -Confirm:$false -ErrorAction SilentlyContinue; '
@@ -767,10 +707,8 @@ def install_wazuh_windows(machine_template, allocated_ip, timeout=900):
         if result.exit_code != 0:
             print(f"[Warning] NIC setup non-zero on Windows VM {machine_template.id}: {result.stderr.strip()!r}", flush=True)
 
-        # Stage all agent files via GA
         _copy_agent_files_windows(ga, _WINDOWS_AGENT_CONFIG_DIR, _WINDOWS_REMOTE_BASE, machine_template.id)
 
-        # Run install phase
         ps1_remote = _WINDOWS_REMOTE_BASE + "\\setup_wazuh.ps1"
         print(f"[Info] Running setup_wazuh.ps1 --install on VM {machine_template.id}", flush=True)
         result = ga.exec(
@@ -785,7 +723,6 @@ def install_wazuh_windows(machine_template, allocated_ip, timeout=900):
             )
         print(f"[Info] setup_wazuh.ps1 --install completed on VM {machine_template.id}", flush=True)
 
-        # Poll for completion flag
         while time.monotonic() < deadline:
             elapsed = int(time.monotonic() - start_time)
             try:
