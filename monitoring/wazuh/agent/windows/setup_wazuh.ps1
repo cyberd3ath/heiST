@@ -478,6 +478,29 @@ try {
 }
 
 # ============================================================
+# Registry flush helper
+# ============================================================
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+public class RegFlush {
+    [DllImport("advapi32.dll", SetLastError = true)]
+    public static extern int RegFlushKey(SafeRegistryHandle hKey);
+}
+"@
+
+function Flush-RegistryKey {
+    param(
+        [string]$Path
+    )
+
+    $key = Get-Item $Path -ErrorAction Stop
+    [RegFlush]::RegFlushKey($key.Handle) | Out-Null
+}
+
+# ============================================================
 # PowerShell logging + process creation (mirrors linux --use_bash_log)
 # ============================================================
 function Enable-PowerShellLogging {
@@ -490,6 +513,10 @@ function Enable-PowerShellLogging {
         if (-not (Test-Path $moduleNamesPath))  { New-Item -Path $moduleNamesPath -Force | Out-Null }
         Set-ItemProperty -Path $moduleLoggingPath -Name "EnableModuleLogging" -Value 1 -Type DWord
         Set-ItemProperty -Path $moduleNamesPath -Name "*" -Value "*" -Type String
+
+        Flush-RegistryKey -Path $moduleLoggingPath
+        Flush-RegistryKey -Path $moduleNamesPath
+
         print_info "  Module Logging enabled (4103)"
     } else {
         print_warning "  Module Logging not available in PS $PSVersion (requires PS3+)"
@@ -501,6 +528,9 @@ function Enable-PowerShellLogging {
         $scriptBlockPath = "HKLM:\SOFTWARE\Wow6432Node\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging"
         if (-not (Test-Path $scriptBlockPath)) { New-Item -Path $scriptBlockPath -Force | Out-Null }
         Set-ItemProperty -Path $scriptBlockPath -Name "EnableScriptBlockLogging" -Value 1 -Type DWord
+
+        Flush-RegistryKey -Path $scriptBlockPath
+
         print_info "  Script Block Logging enabled (4104)"
     } else {
         print_info "  PS $PSVersion < 5: falling back to profile-based transcription..."

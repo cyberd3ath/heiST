@@ -530,7 +530,7 @@ def _copy_agent_files_windows(ga, config_dir, remote_base, vmid):
             ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
              f'New-Item -ItemType Directory -Force -Path "{remote_dir}" | Out-Null'],
             capture_output=False,
-            timeout=45,
+            timeout=90,
         )
 
         with open(abs_path, "rb") as f:
@@ -741,7 +741,7 @@ def install_wazuh_windows(machine_template, allocated_ip, timeout=900):
     """
     _PING_TIMEOUT    = 180
     _INSTALL_TIMEOUT = max(timeout - 120, 300)
-    _FAST_TIMEOUT    = 20
+    _FAST_TIMEOUT    = 40
 
     start_time = time.monotonic()
     deadline   = start_time + timeout
@@ -762,7 +762,7 @@ def install_wazuh_windows(machine_template, allocated_ip, timeout=900):
         result = ga.exec(
             ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", nic_cmd],
             capture_output=True,
-            timeout=45,
+            timeout=90,
         )
         if result.exit_code != 0:
             print(f"[Warning] NIC setup non-zero on Windows VM {machine_template.id}: {result.stderr.strip()!r}", flush=True)
