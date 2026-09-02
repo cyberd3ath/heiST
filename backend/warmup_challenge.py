@@ -661,6 +661,8 @@ def wait_for_networks_to_be_up(challenge, try_timeout=3, max_tries=10):
     all_devices_up = False
 
     tries = 0
+    last_log_time = 0
+    log_interval = 2
 
     while not all_devices_up and tries < max_tries:
         tries += 1
@@ -668,10 +670,16 @@ def wait_for_networks_to_be_up(challenge, try_timeout=3, max_tries=10):
 
         while time.time() - try_start < try_timeout and not all_devices_up:
             all_devices_up = True
-            for device in host_devices:
-                if not os.path.exists(f"/sys/class/net/{device}"):
-                    all_devices_up = False
-                    print(f"[Debug] Device {device} not yet available", flush=True)
+            missing_devices = [d for d in host_devices if not os.path.exists(f"/sys/class/net/{d}")]
+
+            if missing_devices:
+                all_devices_up = False
+                now = time.time()
+                if now - last_log_time >= log_interval:
+                    last_log_time = now
+                    print(f"[Debug] Devices not yet available: {', '.join(missing_devices)}", flush=True)
+
+            time.sleep(0.1)
 
         if not all_devices_up:
             if tries < max_tries:
