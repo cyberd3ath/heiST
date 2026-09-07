@@ -667,7 +667,8 @@ def install_wazuh_linux(machine_template, allocated_ip,timeout=600):
             "iface=$(ip -o link | awk '/0a:00/ {print $2; exit}' | tr -d :) && "
             "ip link set $iface up && "
             f"ip addr add {allocated_ip}/20 dev $iface && "
-            "ip route add default via 10.32.0.1"
+            "ip route add default via 10.32.0.1 && "
+            f"printf 'nameserver {_DNS_SERVERS[0]}\\nnameserver {_DNS_SERVERS[1]}\\n' > /etc/resolv.conf"
         )
         result = ga.exec(nic_cmd, capture_output=True, timeout=30)
         if result.exit_code != 0:
