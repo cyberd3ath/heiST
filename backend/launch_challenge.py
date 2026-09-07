@@ -540,8 +540,6 @@ def force_dhcp_renew_on_windows_machines(challenge):
 def _force_dhcp_renew_on_vm(machine_id):
     """
     Run ipconfig /release followed by /renew on a single Windows VM via QGA.
-    Best-effort: log and continue on failure rather than aborting the launch,
-    since this is a latency optimization, not a correctness requirement.
     """
     try:
         with GuestAgent(vmid=machine_id, windows=True) as ga:

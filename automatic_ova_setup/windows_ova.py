@@ -635,10 +635,6 @@ def main():
     print(f"Username: Administrator / ctf_admin")
     print(f"Password: {VM_PASSWORD}")
     print("=" * 60)
-    print("\nImport into Proxmox with e.g.:")
-    print(f"  qm importovf <new_vmid> {OVA_PATH} <storage>")
-    print("Then switch disk/NIC to virtio + enable the QEMU agent flag in")
-    print("Proxmox if desired (drivers and qemu-ga are already installed).")
 
 
 if __name__ == "__main__":

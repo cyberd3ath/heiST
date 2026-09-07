@@ -23,26 +23,17 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# ============================================================
-# Help
-# ============================================================
 if ($Help) {
     Get-Help $MyInvocation.MyCommand.Path -Full
     exit 0
 }
 
-# ============================================================
-# Must run elevated
-# ============================================================
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "ERROR: This script must be run as Administrator" -ForegroundColor Red
     exit 1
 }
 
-# ============================================================
-# Globals / paths
-# ============================================================
 $LogDir            = "C:\ProgramData\WazuhSetup"
 $LogFile           = Join-Path $LogDir "wazuh_setup.log"
 $OssecDir          = "C:\Program Files (x86)\ossec-agent"
@@ -56,21 +47,16 @@ function print_info    { param([string]$msg) Write-Host "[Info]: $msg" -Foregrou
 function print_warning { param([string]$msg) Write-Host "[Warning]: $msg" -ForegroundColor Yellow; Add-Content -Path $LogFile -Value "[Warning]: $msg" }
 function print_error   { param([string]$msg) Write-Host "[Error]: $msg" -ForegroundColor Red;     Add-Content -Path $LogFile -Value "[Error]: $msg" }
 
-# Mode resolution - mirrors the Linux script's MODE variable
 $Mode = "full"
 if ($Install)    { $Mode = "install" }
 if ($Register)    { $Mode = "register" }
 if ($Run)        { $Mode = "run" }
-# -Reregister is an add-on flag, not an exclusive mode, same as the bash script
 
 if (($Mode -eq "register" -or $Reregister) -and (-not $Manager -or -not $Name)) {
     print_error "Registration requires -Manager and -Name"
     exit 1
 }
 
-# ============================================================
-# Detection helpers
-# ============================================================
 function Get-PSMajorVersion {
     return $PSVersionTable.PSVersion.Major
 }
@@ -91,9 +77,6 @@ if (-not $PSBoundParameters.ContainsKey('UseAdMonitoring')) {
     $UseAdMonitoring = $IsDC
 }
 
-# ============================================================
-# Install: download + run the MSI
-# ============================================================
 function Install-WazuhAgent {
     param(
         [string]$ManagerIp,
@@ -266,9 +249,6 @@ function Ensure-WazuhService {
     }
 }
 
-# ============================================================
-# ossec.conf helpers
-# ============================================================
 function Add-LocalfileIfMissing {
     param(
         [xml]$Config,
@@ -305,9 +285,6 @@ function Update-OssecConfig {
     return $true
 }
 
-# ============================================================
-# System health + active users (mirrors linux --use_system_health)
-# ============================================================
 function Enable-SystemHealthMonitoring {
     print_info "Configuring system health monitoring..."
 
@@ -477,9 +454,6 @@ try {
     print_info "System health monitoring configured"
 }
 
-# ============================================================
-# Registry flush helper
-# ============================================================
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -500,9 +474,6 @@ function Flush-RegistryKey {
     [RegFlush]::RegFlushKey($key.Handle) | Out-Null
 }
 
-# ============================================================
-# PowerShell logging + process creation (mirrors linux --use_bash_log)
-# ============================================================
 function Enable-PowerShellLogging {
     print_info "Configuring PowerShell / process creation logging (PS $PSVersion detected)..."
 
@@ -554,8 +525,6 @@ function Enable-PowerShellLogging {
             print_warning "  Could not set transcript directory permissions: $_"
         }
 
-        # PS2 gets the simpler profile (no exit-event cleanup handler);
-        # PS3/4 gets the fuller one with PowerShell.Exiting cleanup.
         if ($PSVersion -eq 2) {
             $profileCode = Get-TranscriptionProfilePs2
         } else {
@@ -781,10 +750,6 @@ if ($Host.Name -eq "ConsoleHost") {
 '@
 }
 
-# ============================================================
-# AD monitoring (mirrors linux --use_ufw as "the optional extra";
-# only meaningful on Domain Controllers)
-# ============================================================
 function Enable-AdMonitoring {
     if (-not $IsDC) {
         print_warning "AD monitoring requested but this host is not a Domain Controller - skipping"
@@ -846,9 +811,6 @@ function Enable-AdMonitoring {
     }
 }
 
-# ============================================================
-# Registration
-# ============================================================
 function Register-WazuhAgent {
     param([string]$ManagerIp, [string]$AgentName, [string]$EnrollPassword)
 
@@ -895,9 +857,6 @@ function Reregister-WazuhAgent {
     return (Register-WazuhAgent -ManagerIp $ManagerIp -AgentName $AgentName -EnrollPassword $EnrollPassword)
 }
 
-# ============================================================
-# Main dispatch
-# ============================================================
 print_info "Mode: $Mode"
 if ($Reregister) { print_info "Reregister: enabled" }
 
