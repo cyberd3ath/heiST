@@ -491,7 +491,9 @@ def _collect_agent_files(config_dir):
 def _copy_agent_files_linux(ga, config_dir, remote_base, vmid):
     """
     Copy all agent files to a Linux guest via GA, preserving the relative
-    directory structure under remote_base.  Directories are created with mkdir -p.
+    directory structure under remote_base and each local file's Unix mode
+    (e.g. +x bits are carried over automatically -- see
+    GuestAgent.write_local_file).  Directories are created with mkdir -p.
     """
     files = _collect_agent_files(config_dir)
     print(f"[Info] Copying {len(files)} agent files to Linux VM {vmid}", flush=True)
@@ -501,15 +503,9 @@ def _copy_agent_files_linux(ga, config_dir, remote_base, vmid):
         remote_dir  = remote_path.rsplit("/", 1)[0]
 
         ga.exec(["mkdir", "-p", remote_dir], capture_output=False, timeout=10)
-
-        with open(abs_path, "rb") as f:
-            data = f.read()
-        ga.write_file(remote_path, data)
+        ga.write_local_file(abs_path, remote_path)  # preserves local mode bits
         print(f"[Debug] Wrote {rel_path} -> {remote_path} on VM {vmid}", flush=True)
 
-    # Ensure setup_wazuh.sh is executable
-    setup_sh = remote_base + "/setup_wazuh.sh"
-    ga.exec(["chmod", "+x", setup_sh], capture_output=False, timeout=10)
     print(f"[Info] Agent files staged on Linux VM {vmid}", flush=True)
 
 

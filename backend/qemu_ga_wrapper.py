@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import socket
+import stat
 import threading
 import time
 from dataclasses import dataclass
@@ -532,6 +533,7 @@ class GuestAgent:
         data: Union[bytes, str],
         *,
         mode: str = "w",
+        unix_mode: Optional[int] = None,
     ) -> None:
         """Write data to guest_path inside the guest."""
         raw = data.encode("utf-8") if isinstance(data, str) else data
@@ -549,6 +551,37 @@ class GuestAgent:
                 self._call("guest-file-close", {"handle": handle})
             except GuestAgentError:
                 pass
+
+        if unix_mode is not None:
+            if self.windows:
+                logger.debug(
+                    "unix_mode=%o requested for %s but VM %s is Windows; ignoring",
+                    unix_mode, guest_path, self.vmid,
+                )
+            else:
+                self.exec(
+                    ["chmod", format(unix_mode, "o"), guest_path],
+                    capture_output=False,
+                    timeout=10,
+                )
+
+    def write_local_file(
+        self,
+        local_path: Union[str, Path],
+        guest_path: str,
+        *,
+        preserve_mode: bool = True,
+    ) -> None:
+        """Read a local file and write it to guest_path inside the guest,
+        preserving the local file's Unix permission bits by default
+        (Linux guests only -- ignored for Windows guests).
+        """
+        local_path = Path(local_path)
+        data = local_path.read_bytes()
+        unix_mode = None
+        if preserve_mode and not self.windows:
+            unix_mode = stat.S_IMODE(local_path.stat().st_mode)
+        self.write_file(guest_path, data, unix_mode=unix_mode)
 
 
 def _resolve_socket_path(vmid: int) -> Path:
