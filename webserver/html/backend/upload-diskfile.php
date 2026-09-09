@@ -442,7 +442,7 @@ class OvaUploadHandler
             $this->validateFileSize($file['size']);
             $this->validateGuestOS($guestOs);
 
-            $originalName = $this->system->pathinfo($file['name'], PATHINFO_FILENAME);
+            $originalName = $this->system->pathinfo($this->sanitizeFilename($file['name']), PATHINFO_FILENAME);
             $uniqueName = uniqid('ova_') . '.' . strtolower($this->system->pathinfo($file['name'], PATHINFO_EXTENSION));
             $tempPath = $this->system->sys_get_temp_dir() . '/' . $uniqueName;
 
