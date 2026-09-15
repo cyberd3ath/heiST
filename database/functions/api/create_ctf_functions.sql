@@ -62,7 +62,8 @@ CREATE FUNCTION create_machine_template(
     p_name TEXT,
     p_disk_file_id BIGINT,
     p_cores BIGINT,
-    p_ram_gb BIGINT
+    p_ram_gb BIGINT,
+    p_ad_role machine_ad_role
 ) RETURNS BIGINT
 LANGUAGE plpgsql
 SET plpgsql.variable_conflict = 'use_column'
@@ -75,13 +76,15 @@ BEGIN
         name,
         disk_file_id,
         cores,
-        ram_gb
+        ram_gb,
+        ad_role
     ) VALUES (
         p_challenge_template_id,
         p_name,
         p_disk_file_id,
         p_cores,
-        p_ram_gb
+        p_ram_gb,
+        p_ad_role
     ) RETURNING id INTO new_machine_id;
     RETURN new_machine_id::BIGINT;
 END;

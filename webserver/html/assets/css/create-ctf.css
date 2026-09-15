@@ -1034,3 +1034,73 @@ input:checked + .option-slider:before {
 .manual-creation-view.hidden {
     display: none;
 }
+
+/* ===== ACTIVE DIRECTORY ROLE INDICATORS ===== */
+.ad-role-hint {
+    display: block;
+    margin-top: 6px;
+    font-size: 0.8em;
+}
+
+.ad-role-hint-dc {
+    color: var(--color-ad-dc);
+}
+
+.ad-role-hint-member {
+    color: var(--color-ad-member);
+}
+
+.ad-role-hint-warning {
+    color: #ff9a3c;
+}
+
+/* VM icon badge (crown for DC, link icon for member) */
+.vm-ad-badge {
+    position: absolute;
+    top: -6px;
+    left: -6px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    z-index: 5;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.vm-ad-badge-dc {
+    background: var(--color-ad-dc);
+    color: #2b2100;
+}
+
+.vm-ad-badge-member {
+    background: var(--color-ad-member);
+    color: #001a33;
+}
+
+/* VM icon border/glow so DC/member VMs stand out on the canvas at a glance */
+.vm-icon-ad-dc {
+    border: 2px solid var(--color-ad-dc);
+    box-shadow: 0 0 8px rgba(var(--color-ad-dc-rgb), 0.35);
+}
+
+.vm-icon-ad-dc:hover {
+    box-shadow: 0 0 12px rgba(var(--color-ad-dc-rgb), 0.55);
+}
+
+.vm-icon-ad-member {
+    border: 2px solid var(--color-ad-member);
+    box-shadow: 0 0 8px rgba(var(--color-ad-member-rgb), 0.3);
+}
+
+.vm-icon-ad-member:hover {
+    box-shadow: 0 0 12px rgba(var(--color-ad-member-rgb), 0.5);
+}
+
+/* selected state should still show the primary-color ring on top of the role border */
+.vm-icon-ad-dc.selected,
+.vm-icon-ad-member.selected {
+    box-shadow: 0 0 0 3px var(--color-primary);
+}

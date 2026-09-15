@@ -1,4 +1,5 @@
 import random
+import socket
 import threading
 from tenacity import retry, stop_after_attempt, wait_exponential_jitter
 import time
@@ -138,7 +139,7 @@ def fetch_machines(challenge_template, db_conn):
 
     with db_conn.cursor() as cursor:
         cursor.execute(
-            "SELECT mt.id, df.guest_os "
+            "SELECT mt.id, df.guest_os, mt.ad_role "
             "FROM machine_templates mt "
             "JOIN disk_files df ON df.id = mt.disk_file_id "
             "WHERE mt.challenge_template_id = %s",
@@ -149,10 +150,11 @@ def fetch_machines(challenge_template, db_conn):
         print(f"[Info] Retrieved {len(machines_fetched)} machine templates", flush=True)
 
         for row in machines_fetched:
-            machine_id, guest_os = row[0], row[1]
-            print(f"[Debug] Adding machine template {machine_id} (guest_os={guest_os}) to challenge", flush=True)
+            machine_id, guest_os, ad_role = row[0], row[1], row[2]
+            print(f"[Debug] Adding machine template {machine_id} (guest_os={guest_os}, ad_role={ad_role}) to challenge", flush=True)
             machine_template = MachineTemplate(machine_template_id=machine_id, challenge_template=challenge_template)
             machine_template.set_guest_os(guest_os)
+            machine_template.set_ad_role(ad_role)
 
             # Add machine template to challenge template
             challenge_template.add_machine_template(machine_template)
@@ -698,8 +700,12 @@ def configure_dnsmasq_instances(challenge):
     # Collect upstream DNS servers per machine
     dns_servers_by_machine = {machine_id: [] for machine_id in challenge.machines.keys()}
     for machine in challenge.machines.values():
+        is_dc = getattr(machine.template, "ad_role", "none") == "dc"
         for connection in machine.connections.values():
-            dns_servers_by_machine[machine.id].append(connection.network.router_ip)
+            if is_dc:
+                dns_servers_by_machine[machine.id].append(connection.client_ip)
+            else:
+                dns_servers_by_machine[machine.id].append(connection.network.router_ip)
 
     configs_created = 0
 
@@ -708,6 +714,13 @@ def configure_dnsmasq_instances(challenge):
 
         print(f"[Info] Configuring dnsmasq for network {network.id} on device {network.host_device}", flush=True)
         print(f"[Debug] Config path: {config_path}", flush=True)
+
+        dc_domain_ips_on_network = {}
+        for connection in network.connections.values():
+            if getattr(connection.machine.template, "ad_role", "none") != "dc":
+                continue
+            for domain in connection.machine.domains:
+                dc_domain_ips_on_network[domain] = connection.client_ip
 
         with open(config_path, "w") as f:
             # Interface binding
@@ -722,6 +735,11 @@ def configure_dnsmasq_instances(challenge):
             # Ensure dnsmasq only answers known domains and ignores unknown
             f.write("no-resolv\n")          # ignore /etc/resolv.conf
             f.write("no-poll\n")            # don't poll resolv.conf
+
+            for domain, dc_ip in dc_domain_ips_on_network.items():
+                f.write(f"server=/{domain}/{dc_ip}\n")
+                print(f"[Debug] Delegating AD domain {domain} to Domain Controller {dc_ip} "
+                      f"on network {network.id}", flush=True)
 
             # For each connected machine, set DHCP and DNS behavior
             connections_configured = 0
@@ -740,8 +758,11 @@ def configure_dnsmasq_instances(challenge):
                         machines_with_internet_access[connection.machine.id] = connection
                         f.write(f"dhcp-option=tag:{tag},option:classless-static-route,0.0.0.0/0,{network.router_ip}\n")
 
-                # Add only authoritative server for each domain
+                # Add an authoritative A record for each domain, unless it's an
+                # AD zone being delegated above.
                 for domain in connection.machine.domains:
+                    if domain in dc_domain_ips_on_network:
+                        continue
                     f.write(f"address=/{domain}/{connection.client_ip}\n")
 
                 connections_configured += 1
@@ -772,21 +793,84 @@ def attach_networks_to_vms(challenge):
 def launch_machines(challenge):
     """
     Launch machines.
-    """
-    print(f"[Info] Launching {len(challenge.machines)} VMs for challenge {challenge.id}", flush=True)
+   """
+    dc_machines = [
+        m for m in challenge.machines.values()
+        if getattr(m.template, "ad_role", "none") == "dc"
+    ]
+    member_machines = [
+        m for m in challenge.machines.values()
+        if getattr(m.template, "ad_role", "none") == "member"
+    ]
+    independent_machines = [
+        m for m in challenge.machines.values()
+        if m not in dc_machines and m not in member_machines
+    ]
 
-    for machine in challenge.machines.values():
+    print(f"[Info] Launching {len(challenge.machines)} VMs for challenge {challenge.id} "
+          f"({len(dc_machines)} DC, {len(member_machines)} member, {len(independent_machines)} other)", flush=True)
+
+    first_wave = dc_machines + independent_machines
+
+    for machine in first_wave:
         print(f"[Info] Launching VM {machine.id}", flush=True)
         launch_vm_api_call(machine)
 
-    print(f"[Info] All VMs launched, waiting for QEMU Guest Agent to respond on all VMs", flush=True)
-
-    # Wait for all VMs to boot and qemu-ga to be ready
-    for machine in challenge.machines.values():
+    print(f"[Info] Waiting for QEMU Guest Agent to respond on {len(first_wave)} VM(s)", flush=True)
+    for machine in first_wave:
         print(f"[Info] Waiting for QEMU Guest Agent on VM {machine.id}", flush=True)
         wait_for_qemu_guest_agent(machine)
 
+    if member_machines:
+        if dc_machines:
+            for dc in dc_machines:
+                print(f"[Info] Waiting for AD DS (LDAP) to come up on Domain Controller VM {dc.id}", flush=True)
+                wait_for_ldap(dc)
+        else:
+            print(f"[Warning] Challenge {challenge.id} has Domain Member VM(s) but no Domain Controller; "
+                  f"launching members anyway since there is nothing to wait for", flush=True)
+
+        print(f"[Info] Launching {len(member_machines)} Domain Member VM(s)", flush=True)
+        for machine in member_machines:
+            print(f"[Info] Launching VM {machine.id}", flush=True)
+            launch_vm_api_call(machine)
+
+        print(f"[Info] Waiting for QEMU Guest Agent to respond on {len(member_machines)} Domain Member VM(s)", flush=True)
+        for machine in member_machines:
+            print(f"[Info] Waiting for QEMU Guest Agent on VM {machine.id}", flush=True)
+            wait_for_qemu_guest_agent(machine)
+
     print(f"[Info] All VMs are ready with QEMU Guest Agent responding", flush=True)
+
+
+def wait_for_ldap(machine, port=389, timeout=240, interval=3):
+    """
+    Wait until a Domain Controller's LDAP port answers a TCP connection."""
+    candidate_ips = [connection.client_ip for connection in machine.connections.values()]
+
+    if not candidate_ips:
+        raise RuntimeError(f"Domain Controller VM {machine.id} has no network connections to check LDAP on")
+
+    deadline = time.monotonic() + timeout
+    attempt = 0
+
+    while time.monotonic() < deadline:
+        attempt += 1
+        for ip in candidate_ips:
+            try:
+                with socket.create_connection((ip, port), timeout=2):
+                    print(f"[Info] LDAP is up on Domain Controller VM {machine.id} ({ip}:{port}) "
+                          f"after {attempt} attempt(s)", flush=True)
+                    return
+            except OSError:
+                continue
+
+        time.sleep(interval)
+
+    raise TimeoutError(
+        f"Timed out after {timeout}s waiting for LDAP on Domain Controller VM {machine.id} "
+        f"(tried {', '.join(candidate_ips)}:{port})"
+    )
 
 
 def set_challenge_ready(challenge, db_conn):
