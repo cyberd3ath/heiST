@@ -1189,10 +1189,10 @@ class CTFCreator {
 
     adRoleBadge(vm) {
         if (vm.ad_role === 'dc') {
-            return '<span class="vm-ad-badge vm-ad-badge-dc" title="Domain Controller"><i class="fa-solid fa-crown"></i></span>';
+            return '<span class="vm-ad-badge vm-ad-badge-dc" title="Domain Controller"><i class="fa-solid fa-crown crown-icon"></i></span>';
         }
         if (vm.ad_role === 'member') {
-            return '<span class="vm-ad-badge vm-ad-badge-member" title="Domain Member"><i class="fa-solid fa-link"></i></span>';
+            return '<span class="vm-ad-badge vm-ad-badge-member" title="Domain Member"><i class="fa-solid fa-link member-icon"></i></span>';
         }
         return '';
     }

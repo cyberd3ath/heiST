@@ -1036,6 +1036,8 @@ input:checked + .option-slider:before {
 }
 
 /* ===== ACTIVE DIRECTORY ROLE INDICATORS ===== */
+/* Color tokens (--color-ad-dc / --color-ad-member) live in base.css */
+
 .ad-role-hint {
     display: block;
     margin-top: 6px;
@@ -1065,19 +1067,22 @@ input:checked + .option-slider:before {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 9px;
     z-index: 5;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 
 .vm-ad-badge-dc {
-    background: var(--color-ad-dc);
-    color: #2b2100;
+    top: -15px;
+    left: -17px;
+    background: none;
+    box-shadow: none;
 }
 
 .vm-ad-badge-member {
-    background: var(--color-ad-member);
-    color: #001a33;
+    top: -11px;
+    left: -17px;
+    background: none;
+    box-shadow: none;
 }
 
 /* VM icon border/glow so DC/member VMs stand out on the canvas at a glance */
@@ -1103,4 +1108,32 @@ input:checked + .option-slider:before {
 .vm-icon-ad-dc.selected,
 .vm-icon-ad-member.selected {
     box-shadow: 0 0 0 3px var(--color-primary);
+}
+
+.crown-icon {
+    font-size: calc(1.2rem * var(--scale, 1)) !important;
+    color: var(--color-ad-dc) !important
+}
+
+.member-icon {
+    font-size: calc(0.8rem * var(--scale, 1)) !important;
+    color: var(--color-text) !important;
+}
+
+.subnet-vm-container:not(.small-mode):not(.smallest-mode) .vm-ad-badge-member {
+    top: 7px;
+    left: -27px
+}
+
+.subnet-vm-container:not(.small-mode):not(.smallest-mode) .vm-ad-badge-dc {
+    top: 7px;
+    left: -27px
+}
+
+.subnet-vm-container:not(.small-mode):not(.smallest-mode) .crown-icon {
+    font-size: calc(1rem * var(--scale, 1)) !important;
+}
+
+.subnet-vm-container:not(.small-mode):not(.smallest-mode) .member-icon-member {
+    font-size: calc(1rem * var(--scale, 1)) !important;
 }
