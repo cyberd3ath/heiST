@@ -36,14 +36,12 @@ NATNETWORK_PREFIX = "10.50.0."
 
 VMS = {
     "dc": {
-        "VM_ID": 210,
         "VM_NAME": "dc01-corp",
         "COMPUTER_NAME": "DC01",
         "ROLE": "dc",
         "SSH_HOST_PORT": random.randint(20000, 30000),
     },
     "member": {
-        "VM_ID": 211,
         "VM_NAME": "srv01-corp",
         "COMPUTER_NAME": "SRV01",
         "ROLE": "member",
@@ -804,7 +802,7 @@ def build_and_boot_vm(vm_config):
     port = vm_config["SSH_HOST_PORT"]
 
     vm_dir.mkdir(parents=True, exist_ok=True)
-    autounattend_iso = ISO_DIR / f"autounattend-{vm_config['VM_ID']}.iso"
+    autounattend_iso = ISO_DIR / f"autounattend-{vm_config['VM_NAME']}.iso"
 
     setup_script_path = generate_setup_script(vm_dir)
     autounattend_path = generate_autounattend_xml(vm_dir, vm_config["COMPUTER_NAME"])
